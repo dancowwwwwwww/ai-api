@@ -176,8 +176,9 @@ app.post('/api/create-material', async (req, res) => {
 
 app.post('/api/run-task', async (req, res) => {
   try {
-    const { taskData, session } = req.body;
-    const { data, session: s } = await trpcPost('workflow.runTask', { '0': { json: taskData } }, session);
+    const { businessType, apiParams, session } = req.body;
+    if (!businessType || !apiParams) return res.status(400).json({ error: 'businessType & apiParams required' });
+    const { data, session: s } = await trpcPost('workflow.runTask', { '0': { json: { businessType, apiParams } } }, session);
     res.json({ data, session: s });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

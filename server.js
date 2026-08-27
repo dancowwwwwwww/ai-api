@@ -80,30 +80,12 @@ app.post('/api/verify-and-login', async (req, res) => {
       redirect: 'manual'
     });
 
-    let session = extractSession(pageRes.headers);
-    let allCookies = pageRes.headers.getSetCookie?.() || [];
-
-    if (!session && (pageRes.status === 301 || pageRes.status === 302)) {
-      const location = pageRes.headers.get('location');
-      if (location) {
-        const redirUrl = location.startsWith('http') ? location : SITE + location;
-        const redirRes = await fetch(redirUrl, {
-          headers: { 'user-agent': UA, accept: 'text/html', cookie: 'NEXT_LOCALE=id' },
-          redirect: 'manual'
-        });
-        session = extractSession(redirRes.headers);
-        allCookies = allCookies.concat(redirRes.headers.getSetCookie?.() || []);
-      }
-    }
-
-    const verifyBody = { '0': { json: { token } } };
     const r = await fetch(SITE + '/api/trpc/auth.verifyToken?batch=1', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id' + (session ? '; auth_session=' + session : '') },
-      body: JSON.stringify(verifyBody)
+      headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id' },
+      body: JSON.stringify({ '0': { json: { token } } })
     });
     const data = await jp(r);
-    allCookies = allCookies.concat(r.headers.getSetCookie?.() || []);
 
     if (!session) {
       try {

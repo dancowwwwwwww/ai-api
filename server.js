@@ -20,6 +20,12 @@ async function jp(r) {
   try { return JSON.parse(t); } catch { throw new Error('Invalid JSON'); }
 }
 
+function getCookies(r) {
+  const setCookie = r.headers.get('set-cookie');
+  if (!setCookie) return '';
+  return setCookie.split(',').map(c => c.split(';')[0].trim()).join('; ');
+}
+
 app.get('/', (_, res) => res.json({ status: 'ok' }));
 
 app.post('/api/signup', async (req, res) => {
@@ -41,6 +47,24 @@ app.post('/api/signup', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'email & password required' });
+    const body = { '0': { json: { email, password } } };
+    const r = await fetch(SITE + '/api/trpc/auth.signIn?batch=1', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, referer: SITE + '/id/auth/login', 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id' },
+      body: JSON.stringify(body)
+    });
+    const cookies = getCookies(r);
+    const data = await jp(r);
+    const sessionMatch = cookies.match(/auth_session=([^;]+)/);
+    const session = sessionMatch ? sessionMatch[1] : null;
+    res.json({ data, session });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/verify', async (req, res) => {
   try {
     const { token } = req.body;
@@ -51,7 +75,11 @@ app.post('/api/verify', async (req, res) => {
       headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id' },
       body: JSON.stringify(body)
     });
-    res.json(await jp(r));
+    const cookies = getCookies(r);
+    const data = await jp(r);
+    const sessionMatch = cookies.match(/auth_session=([^;]+)/);
+    const session = sessionMatch ? sessionMatch[1] : null;
+    res.json({ data, session });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

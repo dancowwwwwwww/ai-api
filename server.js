@@ -96,7 +96,7 @@ app.post('/api/verify-and-login', async (req, res) => {
       }
     }
 
-    const verifyBody = { '0': { json: { token }, meta: { values: { token: ['undefined'] } } } };
+    const verifyBody = { '0': { json: { token } } };
     const r = await fetch(SITE + '/api/trpc/auth.verifyToken?batch=1', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id' + (session ? '; auth_session=' + session : '') },

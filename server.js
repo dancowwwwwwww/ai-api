@@ -23,6 +23,11 @@ function extractSession(headers) {
     const m = c.match(/auth_session=([^;]+)/);
     if (m) return m[1];
   }
+  const single = headers.get?.('set-cookie');
+  if (single) {
+    const m = single.match(/auth_session=([^;]+)/);
+    if (m) return m[1];
+  }
   return null;
 }
 
@@ -34,8 +39,19 @@ async function trpcPost(endpoint, body, session) {
     body: JSON.stringify(body)
   });
   const data = await jp(r);
-  const sessionFromCookie = extractSession(r.headers);
-  return { data, session: sessionFromCookie };
+  const s = extractSession(r.headers);
+  return { data, session: s };
+}
+
+async function trpcGet(endpoint, input, session) {
+  const cookie = 'NEXT_LOCALE=id' + (session ? '; auth_session=' + session : '');
+  const qs = input ? '?batch=1&input=' + encodeURIComponent(JSON.stringify(input)) : '?batch=1';
+  const r = await fetch(SITE + '/api/trpc/' + endpoint + qs, {
+    headers: { 'user-agent': UA, 'x-trpc-source': 'client', cookie }
+  });
+  const data = await jp(r);
+  const s = extractSession(r.headers);
+  return { data, session: s };
 }
 
 app.get('/', (_, res) => res.json({ status: 'ok' }));
@@ -43,44 +59,57 @@ app.get('/', (_, res) => res.json({ status: 'ok' }));
 app.post('/api/signup', async (req, res) => {
   try {
     const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'email & password required' });
     const body = { '0': { json: { email, password, callbackUrl: SITE + '/auth/verify', turnstileToken: null, utmSource: null, utmMedium: null, utmCampaign: null, utmContent: null, clickId: null }, meta: { values: { turnstileToken: ['undefined'], utmSource: ['undefined'], utmMedium: ['undefined'], utmCampaign: ['undefined'], utmContent: ['undefined'], clickId: ['undefined'] } } } };
     const r = await fetch(SITE + '/api/trpc/auth.signup?batch=1', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, referer: SITE + '/id/auth/signup', 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id' },
       body: JSON.stringify(body)
     });
-    const data = await jp(r);
-    res.json(data);
+    res.json(await jp(r));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/verify', async (req, res) => {
+app.post('/api/verify-and-login', async (req, res) => {
   try {
     const { token } = req.body;
-    const body = { '0': { json: { token }, meta: { values: { token: ['undefined'] } } } };
-    const r = await fetch(SITE + '/api/trpc/auth.verifyToken?batch=1', {
+    if (!token) return res.status(400).json({ error: 'token required' });
+
+    // Visit verify page to get auth_session cookie
+    const pageRes = await fetch(SITE + '/id/auth/verify?token=' + encodeURIComponent(token), {
+      headers: { 'user-agent': UA, accept: 'text/html', cookie: 'NEXT_LOCALE=id' },
+      redirect: 'manual'
+    });
+
+    let session = extractSession(pageRes.headers);
+
+    // Follow redirect if needed
+    if (!session && (pageRes.status === 301 || pageRes.status === 302)) {
+      const location = pageRes.headers.get('location');
+      if (location) {
+        const redirUrl = location.startsWith('http') ? location : SITE + location;
+        const redirRes = await fetch(redirUrl, {
+          headers: { 'user-agent': UA, accept: 'text/html', cookie: 'NEXT_LOCALE=id' },
+          redirect: 'manual'
+        });
+        session = extractSession(redirRes.headers);
+      }
+    }
+
+    if (session) {
+      const { data: userData } = await trpcGet('auth.user', { '0': { json: null, meta: { values: ['undefined'] } } }, session);
+      return res.json({ session, user: userData });
+    }
+
+    // Fallback: try API verify
+    const apiRes = await fetch(SITE + '/api/trpc/auth.verifyToken?batch=1', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id' },
-      body: JSON.stringify(body)
+      body: JSON.stringify({ '0': { json: { token }, meta: { values: { token: ['undefined'] } } } })
     });
-    const data = await jp(r);
-    const session = extractSession(r.headers);
-    res.json({ data, session });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post('/api/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    const body = { '0': { json: { email, password } } };
-    const r = await fetch(SITE + '/api/trpc/auth.signIn?batch=1', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, referer: SITE + '/id/auth/login', 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id' },
-      body: JSON.stringify(body)
-    });
-    const data = await jp(r);
-    const session = extractSession(r.headers);
-    res.json({ data, session });
+    const apiData = await jp(apiRes);
+    session = extractSession(apiRes.headers);
+    return res.json({ session, verifyData: apiData });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -121,13 +150,14 @@ app.post('/api/mail/wait', async (req, res) => {
       const vToken = m1 ? m1[1] : m2 ? m2[1] : null;
       if (vToken) return res.json({ token: vToken, subject: det.subject });
     }
-    res.status(408).json({ error: 'Timeout waiting for email' });
+    res.status(408).json({ error: 'Timeout' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/upload-url', async (req, res) => {
   try {
     const { path, session } = req.body;
+    if (!path || !session) return res.status(400).json({ error: 'path & session required' });
     const { data, session: s } = await trpcPost('uploads.signedUploadUrl', { '0': { json: { path } } }, session);
     res.json({ data, session: s });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -136,6 +166,7 @@ app.post('/api/upload-url', async (req, res) => {
 app.post('/api/upload-image', async (req, res) => {
   try {
     const { url, imageData, contentType } = req.body;
+    if (!url || !imageData) return res.status(400).json({ error: 'url & imageData required' });
     const buffer = Buffer.from(imageData, 'base64');
     const r = await fetch(url, { method: 'PUT', headers: { 'Content-Type': contentType || 'image/png', 'Origin': SITE, 'Referer': SITE + '/' }, body: buffer });
     res.json({ success: r.ok, status: r.status });

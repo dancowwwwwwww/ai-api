@@ -122,10 +122,10 @@ app.post('/api/verify-and-login', async (req, res) => {
 
     if (session) {
       const { data: userData } = await trpcGet('auth.user', { '0': { json: null, meta: { values: ['undefined'] } } }, session);
-      return res.json({ session, user: userData, debug: { pageStatus: pageRes.status, allCookies } });
+      return res.json({ session, user: userData });
     }
 
-    return res.json({ session: null, verifyData: data, debug: { pageStatus: pageRes.status, allCookies } });
+    return res.json({ session: null, verifyData: data });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

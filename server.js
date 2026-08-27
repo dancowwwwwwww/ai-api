@@ -75,41 +75,39 @@ app.post('/api/verify-and-login', async (req, res) => {
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: 'token required' });
 
-    // Visit verify page to get auth_session cookie
-    const pageRes = await fetch(SITE + '/id/auth/verify?token=' + encodeURIComponent(token), {
+    await fetch(SITE + '/id/auth/verify?token=' + encodeURIComponent(token), {
       headers: { 'user-agent': UA, accept: 'text/html', cookie: 'NEXT_LOCALE=id' },
-      redirect: 'manual'
+      redirect: 'follow'
+    }).catch(() => {});
+
+    const body = { '0': { json: { token }, meta: { values: { token: ['undefined'] } } } };
+    const r = await fetch(SITE + '/api/trpc/auth.verifyToken?batch=1', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id' },
+      body: JSON.stringify(body)
     });
+    const data = await jp(r);
 
-    let session = extractSession(pageRes.headers);
-
-    // Follow redirect if needed
-    if (!session && (pageRes.status === 301 || pageRes.status === 302)) {
-      const location = pageRes.headers.get('location');
-      if (location) {
-        const redirUrl = location.startsWith('http') ? location : SITE + location;
-        const redirRes = await fetch(redirUrl, {
-          headers: { 'user-agent': UA, accept: 'text/html', cookie: 'NEXT_LOCALE=id' },
-          redirect: 'manual'
-        });
-        session = extractSession(redirRes.headers);
+    let session = null;
+    try {
+      const arr = Array.isArray(data) ? data : [data];
+      for (const item of arr) {
+        const id = item?.result?.data?.json?.id;
+        if (id && typeof id === 'string' && id.length > 10) {
+          session = id;
+          break;
+        }
       }
-    }
+    } catch {}
+
+    if (!session) session = extractSession(r.headers);
 
     if (session) {
       const { data: userData } = await trpcGet('auth.user', { '0': { json: null, meta: { values: ['undefined'] } } }, session);
       return res.json({ session, user: userData });
     }
 
-    // Fallback: try API verify
-    const apiRes = await fetch(SITE + '/api/trpc/auth.verifyToken?batch=1', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id' },
-      body: JSON.stringify({ '0': { json: { token }, meta: { values: { token: ['undefined'] } } } })
-    });
-    const apiData = await jp(apiRes);
-    session = extractSession(apiRes.headers);
-    return res.json({ session, verifyData: apiData });
+    return res.json({ session: null, verifyData: data });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

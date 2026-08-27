@@ -3,7 +3,7 @@ import cors from 'cors';
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 const SITE = 'https://ai-undress.ai';
 const MAIL = 'https://api.mail.tm';
@@ -55,11 +55,13 @@ app.post('/api/verify', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/user', async (_, res) => {
+app.get('/api/user', async (req, res) => {
   try {
+    const session = req.headers['x-session'];
+    if (!session) return res.status(400).json({ error: 'session required' });
     const input = encodeURIComponent(JSON.stringify({ '0': { json: null, meta: { values: ['undefined'] } } }));
     const r = await fetch(SITE + '/api/trpc/auth.user?batch=1&input=' + input, {
-      headers: { 'user-agent': UA, 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id' }
+      headers: { 'user-agent': UA, 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id; auth_session=' + session }
     });
     res.json(await jp(r));
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -86,7 +88,7 @@ app.post('/api/mail/create', async (_, res) => {
       body: JSON.stringify({ address: addr, password: pass })
     });
     const td = await jp(tr);
-    res.json({ address: addr, password: pass, token: td.token });
+    res.json({ address: addr, password: pass, token: td.token, accountId: ad.id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -114,6 +116,76 @@ app.post('/api/mail/wait', async (req, res) => {
       if (vToken) return res.json({ token: vToken, subject: det.subject });
     }
     res.status(408).json({ error: 'Timeout' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/upload-url', async (req, res) => {
+  try {
+    const { path, session } = req.body;
+    if (!path || !session) return res.status(400).json({ error: 'path & session required' });
+    const body = { '0': { json: { path } } };
+    const r = await fetch(SITE + '/api/trpc/uploads.signedUploadUrl?batch=1', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, referer: SITE + '/id/editor?type=sex-pose', 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id; auth_session=' + session },
+      body: JSON.stringify(body)
+    });
+    res.json(await jp(r));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/upload-image', async (req, res) => {
+  try {
+    const { url, imageData, contentType } = req.body;
+    if (!url || !imageData) return res.status(400).json({ error: 'url & imageData required' });
+    const buffer = Buffer.from(imageData, 'base64');
+    const r = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': contentType || 'image/jpeg', 'Origin': SITE, 'Referer': SITE + '/' },
+      body: buffer
+    });
+    res.json({ success: r.ok, status: r.status });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/create-material', async (req, res) => {
+  try {
+    const { materialData, session } = req.body;
+    if (!materialData || !session) return res.status(400).json({ error: 'materialData & session required' });
+    const body = { '0': { json: materialData } };
+    const r = await fetch(SITE + '/api/trpc/material.createMaterial?batch=1', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, referer: SITE + '/id/editor?type=sex-pose', 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id; auth_session=' + session },
+      body: JSON.stringify(body)
+    });
+    res.json(await jp(r));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/run-task', async (req, res) => {
+  try {
+    const { taskData, session } = req.body;
+    if (!taskData || !session) return res.status(400).json({ error: 'taskData & session required' });
+    const body = { '0': { json: taskData } };
+    const r = await fetch(SITE + '/api/trpc/workflow.runTask?batch=1', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, referer: SITE + '/id/editor?type=sex-pose', 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id; auth_session=' + session },
+      body: JSON.stringify(body)
+    });
+    res.json(await jp(r));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/task-result', async (req, res) => {
+  try {
+    const { session } = req.body;
+    if (!session) return res.status(400).json({ error: 'session required' });
+    const body = { '0': { json: {} } };
+    const r = await fetch(SITE + '/api/trpc/workflow.getOrderTaskResult?batch=1', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, referer: SITE + '/id/editor?type=sex-pose', 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id; auth_session=' + session },
+      body: JSON.stringify(body)
+    });
+    res.json(await jp(r));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

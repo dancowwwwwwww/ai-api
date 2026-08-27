@@ -167,8 +167,9 @@ app.post('/api/upload-image', async (req, res) => {
 
 app.post('/api/create-material', async (req, res) => {
   try {
-    const { materialData, session } = req.body;
-    const { data, session: s } = await trpcPost('material.createMaterial', { '0': { json: materialData } }, session);
+    const { url, format, session } = req.body;
+    if (!url || !format) return res.status(400).json({ error: 'url & format required' });
+    const { data, session: s } = await trpcPost('material.createMaterial', { '0': { json: { url, format } } }, session);
     res.json({ data, session: s });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

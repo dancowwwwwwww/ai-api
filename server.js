@@ -75,11 +75,6 @@ app.post('/api/verify-and-login', async (req, res) => {
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: 'token required' });
 
-    const pageRes = await fetch(SITE + '/id/auth/verify?token=' + encodeURIComponent(token), {
-      headers: { 'user-agent': UA, accept: 'text/html', cookie: 'NEXT_LOCALE=id' },
-      redirect: 'manual'
-    });
-
     const r = await fetch(SITE + '/api/trpc/auth.verifyToken?batch=1', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id' },
@@ -87,18 +82,17 @@ app.post('/api/verify-and-login', async (req, res) => {
     });
     const data = await jp(r);
 
-    if (!session) {
-      try {
-        const arr = Array.isArray(data) ? data : [data];
-        for (const item of arr) {
-          const id = item?.result?.data?.json?.id;
-          if (id && typeof id === 'string' && id.length > 10) {
-            session = id;
-            break;
-          }
+    let session = null;
+    try {
+      const arr = Array.isArray(data) ? data : [data];
+      for (const item of arr) {
+        const id = item?.result?.data?.json?.id;
+        if (id && typeof id === 'string' && id.length > 10) {
+          session = id;
+          break;
         }
-      } catch {}
-    }
+      }
+    } catch {}
 
     if (!session) session = extractSession(r.headers);
 

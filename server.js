@@ -75,39 +75,57 @@ app.post('/api/verify-and-login', async (req, res) => {
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: 'token required' });
 
-    await fetch(SITE + '/id/auth/verify?token=' + encodeURIComponent(token), {
+    const pageRes = await fetch(SITE + '/id/auth/verify?token=' + encodeURIComponent(token), {
       headers: { 'user-agent': UA, accept: 'text/html', cookie: 'NEXT_LOCALE=id' },
-      redirect: 'follow'
-    }).catch(() => {});
+      redirect: 'manual'
+    });
 
-    const body = { '0': { json: { token }, meta: { values: { token: ['undefined'] } } } };
+    let session = extractSession(pageRes.headers);
+    let allCookies = pageRes.headers.getSetCookie?.() || [];
+
+    if (!session && (pageRes.status === 301 || pageRes.status === 302)) {
+      const location = pageRes.headers.get('location');
+      if (location) {
+        const redirUrl = location.startsWith('http') ? location : SITE + location;
+        const redirRes = await fetch(redirUrl, {
+          headers: { 'user-agent': UA, accept: 'text/html', cookie: 'NEXT_LOCALE=id' },
+          redirect: 'manual'
+        });
+        session = extractSession(redirRes.headers);
+        allCookies = allCookies.concat(redirRes.headers.getSetCookie?.() || []);
+      }
+    }
+
+    const verifyBody = { '0': { json: { token }, meta: { values: { token: ['undefined'] } } } };
     const r = await fetch(SITE + '/api/trpc/auth.verifyToken?batch=1', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id' },
-      body: JSON.stringify(body)
+      headers: { 'content-type': 'application/json', 'user-agent': UA, origin: SITE, 'x-trpc-source': 'client', cookie: 'NEXT_LOCALE=id' + (session ? '; auth_session=' + session : '') },
+      body: JSON.stringify(verifyBody)
     });
     const data = await jp(r);
+    allCookies = allCookies.concat(r.headers.getSetCookie?.() || []);
 
-    let session = null;
-    try {
-      const arr = Array.isArray(data) ? data : [data];
-      for (const item of arr) {
-        const id = item?.result?.data?.json?.id;
-        if (id && typeof id === 'string' && id.length > 10) {
-          session = id;
-          break;
+    if (!session) {
+      try {
+        const arr = Array.isArray(data) ? data : [data];
+        for (const item of arr) {
+          const id = item?.result?.data?.json?.id;
+          if (id && typeof id === 'string' && id.length > 10) {
+            session = id;
+            break;
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
 
     if (!session) session = extractSession(r.headers);
 
     if (session) {
       const { data: userData } = await trpcGet('auth.user', { '0': { json: null, meta: { values: ['undefined'] } } }, session);
-      return res.json({ session, user: userData });
+      return res.json({ session, user: userData, debug: { pageStatus: pageRes.status, allCookies } });
     }
 
-    return res.json({ session: null, verifyData: data });
+    return res.json({ session: null, verifyData: data, debug: { pageStatus: pageRes.status, allCookies } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
